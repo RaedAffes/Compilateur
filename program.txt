@@ -1,0 +1,10 @@
+program calcul;
+var a, b, max : integer;
+begin
+  read(a, b);
+  if a > b then
+    max := a
+  else
+    max := b;
+  write(max)
+end.

@@ -7,51 +7,50 @@
 #define pv 3
 #define var 4
 #define dp 5
-#define virg 6
-#define integer 7
-#define tchar 8
-#define begin 9
-#define end 10
-#define affect 11
-#define if_ 12
-#define then_ 13
-#define else_ 14
-#define while_ 15
-#define do_ 16
-#define read_ 17
-#define readln_ 18
-#define write_ 19
-#define writeln_ 20
-#define oprel 21
-#define opadd 22
-#define opmul 23
-#define nb 24
-#define po 25
-#define pf 26
-#define point 27
-#define fin 0
+#define integer 6
+#define car 7
+#define begin_ 8
+#define end_ 9
+#define affect 10
+#define if_ 11
+#define then 12
+#define else_ 13
+#define while_ 14
+#define do_ 15
+#define read_ 16
+#define readln 17
+#define write 18
+#define writeln 19
+#define oprel 20
+#define opadd 21
+#define opmul 22
+#define nb 23
+#define po 24
+#define pf 25
+#define point 26
+#define virg 27
+#define opsub 28
 
 int symbole;
+int *tokens = NULL;
+int token_count = 0;
+int pos = 0;
+int erreurs[1000];
+int nb_erreurs = 0;
 
 int symbole_suivant() {
-    int s;
-    printf("donner le symbole suivant:\n");
-    scanf("%d", &s);
-    return s;
+    if (pos >= token_count) return -1;
+    return tokens[pos++];
 }
 
-void erreur()
-{
-	printf("symbole non accepte ! \n");
-    exit(1);
+void erreur() {
+    erreurs[nb_erreurs++] = pos - 1;
+    symbole = symbole_suivant();
 }
-
 
 void accepter(int T) {
-    if (symbole == T)
-        symbole = symbole_suivant();
-    else
-        erreur();
+    if (symbole == T) symbole = symbole_suivant();
+    else erreur();
 }
 
 void Dcl();
@@ -79,10 +78,8 @@ void P() {
     Dcl();
     Inst_composee();
     accepter(point);
-    printf("Analyse syntaxique terminee avec succes.\n");
-    exit(1);
-   
 }
+
 void Dcl() { DclPrime(); }
 
 void DclPrime() {
@@ -97,42 +94,34 @@ void DclPrime() {
 }
 
 void Liste_id() {
-    if (symbole == id) {
-        accepter(id);
+    accepter(id);
     Liste_idPrime();
-    }
 }
+
 void Liste_idPrime() {
     if (symbole == virg) {
         accepter(virg);
         accepter(id);
         Liste_idPrime();
     }
- 
 }
 
 void Type() {
-    if (symbole == integer)
-        accepter(integer);
-    else if (symbole == tchar)
-        accepter(tchar);
-    else
-        erreur();
+    if (symbole == integer) accepter(integer);
+    else if (symbole == car) accepter(car);
+    else erreur();
 }
 
 void Inst_composee() {
-    accepter(begin);
+    accepter(begin_);
     Inst();
-    accepter(end);
+    accepter(end_);
 }
 
 void Inst() {
-   
-    if (symbole == id || symbole == if_ || symbole == while_ ||
-        symbole == read_ || symbole == readln_ ||
-        symbole == write_ || symbole == writeln_) {
+    if (symbole == id || symbole == if_ || symbole == while_ || symbole == read_ ||
+        symbole == readln || symbole == write || symbole == writeln)
         Liste_inst();
-    }
 }
 
 void Liste_inst() {
@@ -146,7 +135,6 @@ void Liste_instPrime() {
         I();
         Liste_instPrime();
     }
-   
 }
 
 void I() {
@@ -159,7 +147,7 @@ void I() {
         case if_:
             accepter(if_);
             Exp();
-            accepter(then_);
+            accepter(then);
             I();
             if (symbole == else_) {
                 accepter(else_);
@@ -173,25 +161,15 @@ void I() {
             I();
             break;
         case read_:
-            accepter(read_);
+        case readln:
+            accepter(symbole);
             accepter(po);
             accepter(id);
             accepter(pf);
             break;
-        case readln_:
-            accepter(readln_);
-            accepter(po);
-            accepter(id);
-            accepter(pf);
-            break;
-        case write_:
-            accepter(write_);
-            accepter(po);
-            accepter(id);
-            accepter(pf);
-            break;
-        case writeln_:
-            accepter(writeln_);
+        case write:
+        case writeln:
+            accepter(symbole);
             accepter(po);
             accepter(id);
             accepter(pf);
@@ -210,7 +188,7 @@ void ExpPrime() {
     if (symbole == oprel) {
         accepter(oprel);
         Exp_simple();
-   }
+    }
 }
 
 void Exp_simple() {
@@ -224,7 +202,6 @@ void Exp_simplePrime() {
         Terme();
         Exp_simplePrime();
     }
-   
 }
 
 void Terme() {
@@ -241,22 +218,39 @@ void TermePrime() {
 }
 
 void Facteur() {
-    if (symbole == id)
-        accepter(id);
-    else if (symbole == nb)
-        accepter(nb);
+    if (symbole == id) accepter(id);
+    else if (symbole == nb) accepter(nb);
     else if (symbole == po) {
         accepter(po);
         Exp_simple();
         accepter(pf);
-    } else
-        erreur();
+    } else erreur();
+}
+
+void lire_tokens_fichier(const char *nom) {
+    FILE *f = fopen(nom, "r");
+    if (!f) {
+        perror("Erreur fichier");
+        exit(1);
+    }
+    int val;
+    while (fscanf(f, "%d", &val) == 1) {
+        tokens = realloc(tokens, sizeof(int) * (token_count + 1));
+        tokens[token_count++] = val;
+    }
+    fclose(f);
 }
 
 int main() {
-    printf("donner une unite lexicale ou 0 pour terminer \n");
-    scanf("%d", &symbole);
+    lire_tokens_fichier("C:\\Users\\Hp\\Desktop\\Compilation\\Analyse_syntaxique\\code.txt");
+    symbole = symbole_suivant();
     P();
-     
+    if (nb_erreurs == 0) printf("Analyse syntaxique réussie\n");
+    else {
+        printf("Analyse terminée avec %d erreur(s):\n", nb_erreurs);
+        for (int i = 0; i < nb_erreurs; i++)
+            printf(" - Erreur à la position %d\n", erreurs[i]);
+    }
+    free(tokens);
     return 0;
 }
