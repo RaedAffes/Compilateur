@@ -1,0 +1,6 @@
+program simple;
+var num : integer;
+begin
+  num := 42;
+  writeln(num)
+end.

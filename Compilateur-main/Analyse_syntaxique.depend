@@ -1,0 +1,6 @@
+# depslib dependency file v1.0
+1759953878 source:c:\users\hp\desktop\compilation\analyse_syntaxique\main.c
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+
