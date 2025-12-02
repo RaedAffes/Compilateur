@@ -1,0 +1,33 @@
+(1) Valeurg x
+(2) Empiler 10
+(3) :=
+(4) Valeurg y
+(5) Empiler 20
+(6) :=
+(7) Valeurd x
+(8) Valeurd y
+(9) >
+(10) Not
+(11) AllerSi 1000
+(12) Valeurd x
+(13) EcrireLn
+(14) Aller 1001
+(15) Etiq 1000
+(16) Valeurd y
+(17) EcrireLn
+(18) Etiq 1001
+(19) Check_LoopLimit
+(20) Etiq 2000
+(21) Valeurd x
+(22) Valeurd y
+(23) <
+(24) Not
+(25) AllerSi 2001
+(26) Valeurg x
+(27) Valeurd x
+(28) Empiler 1
+(29) +
+(30) :=
+(31) Aller 2000
+(32) Etiq 2001
+(33) Arret
