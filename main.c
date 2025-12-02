@@ -436,8 +436,12 @@ void L_INST() { I(); L_INST1(); }
 void L_INST1() {
     if (symbole.ul == pv) {
         accepter(pv);
-        I();
-        L_INST1();
+        
+        // Vérifier qu'on n'est pas à la fin du bloc
+        if (symbole.ul != end) {
+            I();
+            L_INST1();
+        }
     }
 }
 
