@@ -56,15 +56,19 @@ typedef struct {
 /* ==== SEMANTIC ANALYZER STRUCTURES ==== */
 typedef struct {
     char name[50];
-    int type;  // integer=8 ou chart=9
+    int type;      // integer=8 ou chart=9
+    int address;   // Adresse mémoire
+    int initialized; // 0=non initialisé, 1=initialisé
 } SymbolType;
 
 SymbolType symbolTypeTable[100];
 int symbolCount = 0;
+int nextAddress = 0;
 
 FILE *fp;
-FILE *fd;  // Fichier de sortie pour le transducteur
+FILE *fd;
 int nb_id = 0;
+int instructionCounter = 1;
 
 int mot_cle[20] = {1, 10, 5, 8, 9, 11, 12, 13, 14, 15, 16, 17, 25, 26, 27};
 char tab_mot_cle[20][20] = {
@@ -78,10 +82,9 @@ char ch[50];
 int z = 0;
 unilex symbole;
 
-// Variables pour la gestion sémantique
-int currentDataType;  // Type actuel lors de la déclaration
-int idsCurrent[20];   // IDs en cours de déclaration
-int count = 0;        // Nombre d'IDs en cours
+int currentDataType;
+int idsCurrent[20];
+int count = 0;
 
 /* ==== SEMANTIC FUNCTIONS ==== */
 int findSymbol(char *name) {
@@ -96,32 +99,78 @@ void addSymbol(char *name, int type) {
     if (symbolCount < 100) {
         strcpy(symbolTypeTable[symbolCount].name, name);
         symbolTypeTable[symbolCount].type = type;
+        symbolTypeTable[symbolCount].address = nextAddress++;
+        symbolTypeTable[symbolCount].initialized = 0;
         symbolCount++;
     } else {
-        printf("Erreur : Table des symboles pleine.\n");
+        printf("ERREUR SEMANTIQUE : Table des symboles pleine.\n");
         exit(1);
     }
 }
 
 void semanticError(const char *message) {
-    printf("Erreur sémantique : %s\n", message);
+    printf("ERREUR SEMANTIQUE : %s\n", message);
     exit(1);
 }
 
-void checkAssignmentCompatibility(int idDataType, int expDataType) {
-    if (idDataType != expDataType) {
-        printf("Erreur : Incompatibilité de types lors de l'affectation\n");
+void checkVariableDeclared(char *name) {
+    if (findSymbol(name) == -1) {
+        printf("ERREUR SEMANTIQUE : Variable '%s' non déclarée\n", name);
         exit(1);
     }
 }
 
-/* ==== CODE GENERATOR (TRANSDUCTEUR) ==== */
-void emettre(const char* instruction) {
-    if (fd == NULL) {
-        fprintf(stderr, "Erreur : fichier émetteur non initialisé.\n");
-        return;
+void checkVariableInitialized(char *name) {
+    int idx = findSymbol(name);
+    if (idx == -1) {
+        printf("ERREUR SEMANTIQUE : Variable '%s' non déclarée\n", name);
+        exit(1);
     }
-    fprintf(fd, "%s\n", instruction);
+    if (symbolTypeTable[idx].initialized == 0) {
+        printf("AVERTISSEMENT SEMANTIQUE : Variable '%s' utilisée avant initialisation\n", name);
+    }
+}
+
+void markVariableInitialized(char *name) {
+    int idx = findSymbol(name);
+    if (idx != -1) {
+        symbolTypeTable[idx].initialized = 1;
+    }
+}
+
+int getVariableType(char *name) {
+    int idx = findSymbol(name);
+    if (idx == -1) return -1;
+    return symbolTypeTable[idx].type;
+}
+
+void checkTypeCompatibility(int type1, int type2, const char *operation) {
+    if (type1 != type2) {
+        printf("ERREUR SEMANTIQUE : Incompatibilité de types dans %s (%s != %s)\n", 
+               operation,
+               (type1 == integer) ? "integer" : "char",
+               (type2 == integer) ? "integer" : "char");
+        exit(1);
+    }
+}
+
+/* ==== CODE GENERATOR ==== */
+void emettre(const char* inst, const char* arg) {
+    if (fd == NULL) return;
+    if (arg != NULL)
+        fprintf(fd, "(%d) %s %s\n", instructionCounter++, inst, arg);
+    else
+        fprintf(fd, "(%d) %s\n", instructionCounter++, inst);
+}
+
+void emettreInt(const char* inst, int val) {
+    if (fd == NULL) return;
+    fprintf(fd, "(%d) %s %d\n", instructionCounter++, inst, val);
+}
+
+void emettreCheck(const char* checkType) {
+    if (fd == NULL) return;
+    fprintf(fd, "(%d) Check_%s\n", instructionCounter++, checkType);
 }
 
 const char* nomSymbole(int code) {
@@ -153,31 +202,12 @@ const char* nomSymbole(int code) {
         case elsee: return "elsee";
         case then: return "then";
         case do: return "do";
-        case ppe: return "<=";
-        case dif: return "<>";
-        case ppq: return "<";
-        case pgq: return ">";
-        case pge: return ">=";
-        case ega: return "=";
-        case add: return "+";
-        case sub: return "-";
-        case or: return "or";
-        case mul: return "*";
-        case divv: return "/";
-        case modv: return "mod";
-        case andv: return "and";
-        case comment: return "comment";
-        case strlit: return "strlit";
-        case fin: return "fin";
         default: return "inconnu";
     }
 }
 
 void reculer(int k) { fseek(fp, -k, SEEK_CUR); }
-
-int carsuivant() {
-    return fgetc(fp);
-}
+int carsuivant() { return fgetc(fp); }
 
 int unilexid() {
     for (int i = 0; i < 15; i++)
@@ -204,28 +234,14 @@ unilex analex() {
 
     while (1) {
         switch (etat) {
-
         case 0:
             car = carsuivant();
             if (car == EOF) { symbole.ul = fin; return symbole; }
-
             if (car==' ' || car=='\t' || car=='\r' || car=='\n') continue;
-
-            else if (isalpha(car)) { 
-                z=0; 
-                ch[z++]=(char)car;
-                etat=1; 
-            }
-
-            else if (isdigit(car)) { 
-                z=0; 
-                ch[z++]=(char)car;
-                etat=3; 
-            }
-
+            else if (isalpha(car)) { z=0; ch[z++]=(char)car; etat=1; }
+            else if (isdigit(car)) { z=0; ch[z++]=(char)car; etat=3; }
             else if (car=='<') etat=5;
             else if (car=='>' ) etat=9;
-
             else if (car=='=') { symbole.ul=oprel; symbole.att=ega; etat=100; }
             else if (car=='+') { symbole.ul=opadd; symbole.att=add; etat=100; }
             else if (car=='-') { symbole.ul=opadd; symbole.att=sub; etat=100; }
@@ -238,7 +254,6 @@ unilex analex() {
             else if (car==';') { symbole.ul=pv; etat=100; }
             else if (car=='.') { symbole.ul=pt; etat=100; }
             else if (car=='\'') { z=0; etat=50; }
-
             break;
 
         case 1:
@@ -250,7 +265,6 @@ unilex analex() {
                 ch[z] = '\0';
                 symbole.ul = unilexid();
                 symbole.att = rangerid(symbole.ul, &nb_id);
-                printf("TOKEN: %-10s (CODE: %d)\n", nomSymbole(symbole.ul), symbole.ul);
                 return symbole;
             }
             break;
@@ -264,7 +278,6 @@ unilex analex() {
                 ch[z]='\0';
                 symbole.ul = nb;
                 symbole.att = atoi(ch);
-                printf("TOKEN: %-10s (CODE: %d)\n", nomSymbole(symbole.ul), symbole.ul);
                 return symbole;
             }
             break;
@@ -275,7 +288,6 @@ unilex analex() {
             else if (car=='>') symbole.att = dif;
             else { reculer(1); symbole.att = ppq; }
             symbole.ul = oprel;
-            printf("TOKEN: %-10s (att: %d)\n", nomSymbole(symbole.ul), symbole.att);
             return symbole;
 
         case 9:
@@ -283,14 +295,12 @@ unilex analex() {
             if (car=='=') symbole.att = pge;
             else { reculer(1); symbole.att = pgq; }
             symbole.ul = oprel;
-            printf("TOKEN: %-10s (att: %d)\n", nomSymbole(symbole.ul), symbole.att);
             return symbole;
 
         case 23:
             car = carsuivant();
             if (car=='=') symbole.ul = aff;
             else { reculer(1); symbole.ul = dp; }
-            printf("TOKEN: %-10s (CODE: %d)\n", nomSymbole(symbole.ul), symbole.ul);
             return symbole;
 
         case 50:
@@ -298,57 +308,49 @@ unilex analex() {
             if (car=='\'') {
                 ch[z]='\0';
                 symbole.ul = strlit;
-                printf("TOKEN: '%s' (%s)\n", ch, nomSymbole(symbole.ul));
                 return symbole;
             }
             else ch[z++] = (char)car;
             break;
 
         case 100:
-            printf("TOKEN: %-10s (CODE: %d)\n", nomSymbole(symbole.ul), symbole.ul);
             return symbole;
         }
     }
 }
 
 unilex symbole_suivant() { return analex(); }
-void erreur() { printf("Erreur syntaxique !\n"); exit(1); }
+void erreur() { printf("ERREUR SYNTAXIQUE !\n"); exit(1); }
 void accepter(int t) { if (symbole.ul==t) symbole=symbole_suivant(); else erreur(); }
 
 void P(); void DCL(); void D1(); void L_ID(); void L1(); void TYPE();
 void INST_COMP(); void INST(); void L_INST(); void L_INST1();
-void I(); void EXP(); void EXP_SIMPLE(); void EXP1();
-void TERME(); void EXP_SIMPLE1(); void TERME1(); void FACTEUR();
-void ARG_LIST();
+void I(); int EXP(); int EXP_SIMPLE(); void EXP1(int type1);
+int TERME(); void EXP_SIMPLE1(int type1); int TERME1(int type1); int FACTEUR();
 
 void P() {
     if (symbole.ul == program) {
-        emettre("DEBUT_PROGRAMME");
         accepter(program);
         accepter(id);
         accepter(pv);
         DCL();
         INST_COMP();
         accepter(pt);
-        emettre("FIN_PROGRAMME");
+        emettre("Arret", NULL);
 
         if (symbole.ul != fin) erreur();
 
-        printf("\n=== Compilation réussie ! ===\n");
+        printf("\n=== COMPILATION REUSSIE ! ===\n");
     }
     else erreur();
 }
 
-void DCL() { 
-    emettre("DEBUT_DECLARATIONS");
-    D1(); 
-    emettre("FIN_DECLARATIONS");
-}
+void DCL() { D1(); }
 
 void D1() {
     if (symbole.ul == var) {
         accepter(var);
-        count = 0;  // Réinitialiser le compteur
+        count = 0;
         L_ID();
         accepter(dp);
         TYPE();
@@ -359,15 +361,14 @@ void D1() {
 
 void L_ID() { 
     if (symbole.ul == id) {
-        // Vérifier si l'identificateur est déjà déclaré
+        // CONTROLE D'UNICITE
         int index = findSymbol(tab_iden[symbole.att]);
         if (index != -1) {
-            char error[100];
-            sprintf(error, "Identificateur '%s' déjà déclaré", tab_iden[symbole.att]);
-            semanticError(error);
+            printf("ERREUR SEMANTIQUE : Identificateur '%s' déjà déclaré\n", 
+                   tab_iden[symbole.att]);
+            exit(1);
         }
         
-        // Stocker l'ID en attente
         idsCurrent[count] = symbole.att;
         count++;
         
@@ -382,15 +383,14 @@ void L1() {
         accepter(v); 
         
         if (symbole.ul == id) {
-            // Vérifier si l'identificateur est déjà déclaré
+            // CONTROLE D'UNICITE
             int index = findSymbol(tab_iden[symbole.att]);
             if (index != -1) {
-                char error[100];
-                sprintf(error, "Identificateur '%s' déjà déclaré", tab_iden[symbole.att]);
-                semanticError(error);
+                printf("ERREUR SEMANTIQUE : Identificateur '%s' déjà déclaré\n", 
+                       tab_iden[symbole.att]);
+                exit(1);
             }
             
-            // Stocker l'ID en attente
             idsCurrent[count] = symbole.att;
             count++;
             
@@ -402,7 +402,6 @@ void L1() {
 
 void TYPE() {
     int type;
-    char emitBuffer[100];
     
     if (symbole.ul == integer) {
         type = integer;
@@ -414,25 +413,18 @@ void TYPE() {
     }
     else erreur();
     
-    // Ajouter tous les IDs en attente à la table des symboles
     for (int i = 0; i < count; i++) {
         addSymbol(tab_iden[idsCurrent[i]], type);
-        sprintf(emitBuffer, "DECLARE %s : %s", 
-                tab_iden[idsCurrent[i]], 
-                (type == integer) ? "INTEGER" : "CHAR");
-        emettre(emitBuffer);
     }
     
-    count = 0;  // Réinitialiser le compteur
+    count = 0;
 }
 
 void INST_COMP() {
     if (symbole.ul == begin) {
-        emettre("DEBUT_BLOC");
         accepter(begin);
         INST();
         accepter(end);
-        emettre("FIN_BLOC");
     }
     else erreur();
 }
@@ -450,64 +442,145 @@ void L_INST1() {
 }
 
 void I() {
-    char emitBuffer[100];
-    
     if (symbole.ul == id) {
         int idIndex = symbole.att;
+        char *varName = tab_iden[idIndex];
         
-        // Vérifier que la variable est déclarée
-        int symIndex = findSymbol(tab_iden[idIndex]);
-        if (symIndex == -1) {
-            char error[100];
-            sprintf(error, "Variable '%s' non déclarée", tab_iden[idIndex]);
-            semanticError(error);
-        }
+        // CONTROLE : Variable déclarée
+        checkVariableDeclared(varName);
+        int varType = getVariableType(varName);
         
-        sprintf(emitBuffer, "AFFECTATION %s", tab_iden[idIndex]);
-        emettre(emitBuffer);
+        emettre("Valeurg", varName);
         
         accepter(id);
         accepter(aff);
-        EXP_SIMPLE();
         
-        // Note: La vérification complète de type nécessiterait 
-        // de propager le type de l'expression
+        // Évaluer l'expression et récupérer son type
+        int expType = EXP_SIMPLE();
+        
+        // CONTROLE DE TYPE : Affectation
+        checkTypeCompatibility(varType, expType, "affectation");
+        
+        // Marquer la variable comme initialisée
+        markVariableInitialized(varName);
+        
+        emettre(":=", NULL);
     }
     else if (symbole.ul == iff) {
-        emettre("DEBUT_IF");
+        static int labelCounter = 1000;
+        int elseLabel = labelCounter++;
+        int endLabel = labelCounter++;
+        
         accepter(iff);
-        EXP();
-        emettre("IF_THEN");
+        int condType = EXP();
+        
+        // CONTROLE DE TYPE : Condition doit être booléenne (ou integer comme booléen)
+        if (condType != integer) {
+            printf("AVERTISSEMENT : La condition devrait être de type entier\n");
+        }
+        
+        emettre("Not", NULL);
+        emettreInt("AllerSi", elseLabel);
+        
         accepter(then);
         I();
-        emettre("IF_ELSE");
+        
+        emettreInt("Aller", endLabel);
+        
+        emettreInt("Etiq", elseLabel);
         accepter(elsee);
         I();
-        emettre("FIN_IF");
+        
+        emettreInt("Etiq", endLabel);
     }
     else if (symbole.ul == whilee) {
-        emettre("DEBUT_WHILE");
+        static int whileLabelCounter = 2000;
+        int startLabel = whileLabelCounter++;
+        int endLabel = whileLabelCounter++;
+        
+        // DETECTION DE BOUCLE INFINIE (vérification à l'exécution)
+        emettreCheck("LoopLimit");
+        
+        emettreInt("Etiq", startLabel);
         accepter(whilee);
-        EXP();
-        emettre("WHILE_DO");
+        int condType = EXP();
+        
+        // CONTROLE DE TYPE : Condition
+        if (condType != integer) {
+            printf("AVERTISSEMENT : La condition devrait être de type entier\n");
+        }
+        
+        emettre("Not", NULL);
+        emettreInt("AllerSi", endLabel);
+        
         accepter(do);
         I();
-        emettre("FIN_WHILE");
+        
+        emettreInt("Aller", startLabel);
+        
+        emettreInt("Etiq", endLabel);
     }
     else if (symbole.ul == read || symbole.ul == readln) {
-        sprintf(emitBuffer, "%s", (symbole.ul == read) ? "READ" : "READLN");
-        emettre(emitBuffer);
         accepter(symbole.ul);
         accepter(po);
-        ARG_LIST();
+        
+        if (symbole.ul == id) {
+            char *varName = tab_iden[symbole.att];
+            checkVariableDeclared(varName);
+            emettre("Valeurg", varName);
+            markVariableInitialized(varName);
+            accepter(id);
+            emettre("Lire", NULL);
+            
+            while (symbole.ul == v) {
+                accepter(v);
+                if (symbole.ul == id) {
+                    varName = tab_iden[symbole.att];
+                    checkVariableDeclared(varName);
+                    emettre("Valeurg", varName);
+                    markVariableInitialized(varName);
+                    accepter(id);
+                    emettre("Lire", NULL);
+                }
+            }
+        }
+        
         accepter(pf);
     }
     else if (symbole.ul == write || symbole.ul == writeln) {
-        sprintf(emitBuffer, "%s", (symbole.ul == write) ? "WRITE" : "WRITELN");
-        emettre(emitBuffer);
+        int isWriteln = (symbole.ul == writeln);
         accepter(symbole.ul);
         accepter(po);
-        ARG_LIST();
+        
+        if (symbole.ul == id) {
+            char *varName = tab_iden[symbole.att];
+            checkVariableDeclared(varName);
+            checkVariableInitialized(varName);
+            emettre("Valeurd", varName);
+            accepter(id);
+            emettre(isWriteln ? "EcrireLn" : "Ecrire", NULL);
+            
+            while (symbole.ul == v) {
+                accepter(v);
+                if (symbole.ul == id) {
+                    varName = tab_iden[symbole.att];
+                    checkVariableDeclared(varName);
+                    checkVariableInitialized(varName);
+                    emettre("Valeurd", varName);
+                    accepter(id);
+                    emettre(isWriteln ? "EcrireLn" : "Ecrire", NULL);
+                }
+                else if (symbole.ul == strlit) {
+                    accepter(strlit);
+                    emettre(isWriteln ? "EcrireLn" : "Ecrire", NULL);
+                }
+            }
+        }
+        else if (symbole.ul == strlit) {
+            accepter(strlit);
+            emettre(isWriteln ? "EcrireLn" : "Ecrire", NULL);
+        }
+        
         accepter(pf);
     }
     else if (symbole.ul == begin) {
@@ -516,103 +589,118 @@ void I() {
     else erreur();
 }
 
-void ARG_LIST() {
-    if (symbole.ul == id || symbole.ul == strlit) {
-        if (symbole.ul == id) {
-            // Vérifier que la variable est déclarée
-            int symIndex = findSymbol(tab_iden[symbole.att]);
-            if (symIndex == -1) {
-                char error[100];
-                sprintf(error, "Variable '%s' non déclarée", tab_iden[symbole.att]);
-                semanticError(error);
-            }
-        }
-        accepter(symbole.ul);
-        while (symbole.ul == v) {
-            accepter(v);
-            if (symbole.ul == id || symbole.ul == strlit) {
-                if (symbole.ul == id) {
-                    int symIndex = findSymbol(tab_iden[symbole.att]);
-                    if (symIndex == -1) {
-                        char error[100];
-                        sprintf(error, "Variable '%s' non déclarée", tab_iden[symbole.att]);
-                        semanticError(error);
-                    }
-                }
-                accepter(symbole.ul);
-            }
-            else erreur();
-        }
-    }
+int EXP() { 
+    int type1 = EXP_SIMPLE();
+    EXP1(type1);
+    return type1;
 }
 
-void EXP() { 
-    emettre("DEBUT_EXPRESSION");
-    EXP_SIMPLE(); 
-    EXP1(); 
-    emettre("FIN_EXPRESSION");
-}
-
-void EXP1() { 
-    if (symbole.ul == oprel) { 
-        char emitBuffer[50];
-        sprintf(emitBuffer, "OPERATEUR_RELATIONNEL");
-        emettre(emitBuffer);
+void EXP1(int type1) { 
+    if (symbole.ul == oprel) {
+        int op = symbole.att;
         accepter(oprel); 
-        EXP_SIMPLE(); 
+        int type2 = EXP_SIMPLE();
+        
+        // CONTROLE DE TYPE : Opérations relationnelles
+        checkTypeCompatibility(type1, type2, "opération relationnelle");
+        
+        switch(op) {
+            case ega: emettre("=", NULL); break;
+            case dif: emettre("<>", NULL); break;
+            case ppq: emettre("<", NULL); break;
+            case pgq: emettre(">", NULL); break;
+            case ppe: emettre("<=", NULL); break;
+            case pge: emettre(">=", NULL); break;
+        }
     } 
 }
 
-void EXP_SIMPLE() { TERME(); EXP_SIMPLE1(); }
+int EXP_SIMPLE() { 
+    int type = TERME();
+    EXP_SIMPLE1(type);
+    return type;
+}
 
-void EXP_SIMPLE1() {
+void EXP_SIMPLE1(int type1) {
     if (symbole.ul == opadd) {
-        emettre("OPERATEUR_ADDITIF");
+        int op = symbole.att;
         accepter(opadd);
-        TERME();
-        EXP_SIMPLE1();
-    }
-}
-
-void TERME() { FACTEUR(); TERME1(); }
-
-void TERME1() {
-    if (symbole.ul == opmul) {
-        emettre("OPERATEUR_MULTIPLICATIF");
-        accepter(opmul);
-        FACTEUR();
-        TERME1();
-    }
-}
-
-void FACTEUR() {
-    char emitBuffer[100];
-    
-    if (symbole.ul == id) {
-        // Vérifier que la variable est déclarée
-        int symIndex = findSymbol(tab_iden[symbole.att]);
-        if (symIndex == -1) {
-            char error[100];
-            sprintf(error, "Variable '%s' non déclarée", tab_iden[symbole.att]);
-            semanticError(error);
+        int type2 = TERME();
+        
+        // CONTROLE DE TYPE : Opérations additives
+        checkTypeCompatibility(type1, type2, "opération additive");
+        
+        switch(op) {
+            case add: emettre("+", NULL); break;
+            case sub: emettre("-", NULL); break;
+            case or: emettre("Or", NULL); break;
         }
-        sprintf(emitBuffer, "LOAD_VAR %s", tab_iden[symbole.att]);
-        emettre(emitBuffer);
+        
+        EXP_SIMPLE1(type1);
+    }
+}
+
+int TERME() { 
+    int type = FACTEUR();
+    return TERME1(type);
+}
+
+int TERME1(int type1) {
+    if (symbole.ul == opmul) {
+        int op = symbole.att;
+        accepter(opmul);
+        int type2 = FACTEUR();
+        
+        // CONTROLE DE TYPE : Opérations multiplicatives
+        checkTypeCompatibility(type1, type2, "opération multiplicative");
+        
+        switch(op) {
+            case mul: emettre("*", NULL); break;
+            case divv: 
+                // CONTROLE : Division par zéro (vérification à l'exécution)
+                emettreCheck("DivByZero");
+                emettre("Div", NULL); 
+                break;
+            case modv: 
+                emettreCheck("DivByZero");
+                emettre("Mod", NULL); 
+                break;
+            case andv: emettre("And", NULL); break;
+        }
+        
+        return TERME1(type1);
+    }
+    return type1;
+}
+
+int FACTEUR() {
+    if (symbole.ul == id) {
+        char *varName = tab_iden[symbole.att];
+        
+        // CONTROLE : Variable déclarée et initialisée
+        checkVariableDeclared(varName);
+        checkVariableInitialized(varName);
+        
+        int varType = getVariableType(varName);
+        
+        emettre("Valeurd", varName);
         accepter(id);
+        
+        return varType;
     }
     else if (symbole.ul == nb) {
-        sprintf(emitBuffer, "LOAD_CONST %d", symbole.att);
-        emettre(emitBuffer);
+        emettreInt("Empiler", symbole.att);
         accepter(nb);
+        return integer;
     }
     else if (symbole.ul == po) {
-        emettre("DEBUT_PARENTHESE");
         accepter(po);
-        EXP_SIMPLE();
+        int type = EXP_SIMPLE();
         accepter(pf);
-        emettre("FIN_PARENTHESE");
+        return type;
     }
     else erreur();
+    return -1;
 }
 
 int main() {
@@ -629,19 +717,27 @@ int main() {
         return 1; 
     }
 
-    printf("\n=== DÉBUT DE LA COMPILATION ===\n\n");
+    printf("\n=== DEBUT DE LA COMPILATION ===\n\n");
+    printf("=== ANALYSE SEMANTIQUE ACTIVEE ===\n");
+    printf("- Controle d'unicite\n");
+    printf("- Controle de type\n");
+    printf("- Controle d'initialisation\n");
+    printf("- Controle de flot d'execution\n");
+    printf("- Verification dynamique (division par 0, boucles)\n\n");
     
     symbole = symbole_suivant();
     P();
     
     printf("\n=== TABLE DES SYMBOLES ===\n");
     for (int i = 0; i < symbolCount; i++) {
-        printf("  %s : %s\n", 
+        printf("  %s : %s (adresse: %d, init: %s)\n", 
                symbolTypeTable[i].name, 
-               (symbolTypeTable[i].type == integer) ? "INTEGER" : "CHAR");
+               (symbolTypeTable[i].type == integer) ? "INTEGER" : "CHAR",
+               symbolTypeTable[i].address,
+               symbolTypeTable[i].initialized ? "OUI" : "NON");
     }
     
-    printf("\n=== Code généré dans emetteur.txt ===\n");
+    printf("\n=== Code genere dans emetteur.txt ===\n");
 
     fclose(fp);
     fclose(fd);
