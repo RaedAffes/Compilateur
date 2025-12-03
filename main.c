@@ -107,7 +107,12 @@ void addSymbol(char *name, int type) {
         exit(1);
     }
 }
-
+void Check_DivByZero(int diviseur) {
+    if (diviseur == 0) {
+        printf("ERREUR SEMANTIQUE : Division par zéro (constante) détectée !\n");
+        exit(1);
+    }
+}
 void semanticError(const char *message) {
     printf("ERREUR SEMANTIQUE : %s\n", message);
     exit(1);
@@ -653,15 +658,22 @@ int TERME1(int type1) {
     if (symbole.ul == opmul) {
         int op = symbole.att;
         accepter(opmul);
+        
+        // VÉRIFICATION AVANT d'appeler FACTEUR()
+        if ((op == divv || op == modv) && symbole.ul == nb && symbole.att == 0) {
+            Check_DivByZero(0);
+        }
+        
         int type2 = FACTEUR();
         
         // CONTROLE DE TYPE : Opérations multiplicatives
         checkTypeCompatibility(type1, type2, "opération multiplicative");
         
         switch(op) {
-            case mul: emettre("*", NULL); break;
+            case mul: 
+                emettre("*", NULL); 
+                break;
             case divv: 
-                // CONTROLE : Division par zéro (vérification à l'exécution)
                 emettreCheck("DivByZero");
                 emettre("Div", NULL); 
                 break;
@@ -669,7 +681,9 @@ int TERME1(int type1) {
                 emettreCheck("DivByZero");
                 emettre("Mod", NULL); 
                 break;
-            case andv: emettre("And", NULL); break;
+            case andv: 
+                emettre("And", NULL); 
+                break;
         }
         
         return TERME1(type1);
@@ -722,12 +736,7 @@ int main() {
     }
 
     printf("\n=== DEBUT DE LA COMPILATION ===\n\n");
-    printf("=== ANALYSE SEMANTIQUE ACTIVEE ===\n");
-    printf("- Controle d'unicite\n");
-    printf("- Controle de type\n");
-    printf("- Controle d'initialisation\n");
-    printf("- Controle de flot d'execution\n");
-    printf("- Verification dynamique (division par 0, boucles)\n\n");
+    
     
     symbole = symbole_suivant();
     P();
